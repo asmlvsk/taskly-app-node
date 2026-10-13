@@ -38,12 +38,13 @@ while IFS= read -r line; do
   fi
 done < <(git status --porcelain --untracked-files=all)
 
-node - "${#violations[@]}" "${violations[@]:-}" "--" "${kept[@]:-}" <<'EOF'
+printf '%s\n' "${violations[@]:+${violations[@]}}" > .agent/guard-violations.txt
+printf '%s\n' "${kept[@]:+${kept[@]}}" > .agent/guard-kept.txt
+node - <<'EOF'
 const fs = require('node:fs');
-const args = process.argv.slice(2);
-const n = Number(args.shift());
-const violations = args.slice(0, n).filter(Boolean);
-const kept = args.slice(n + 1).filter(Boolean);
+const lines = (f) => fs.readFileSync(f, 'utf8').split('\n').filter(Boolean);
+const violations = lines('.agent/guard-violations.txt');
+const kept = lines('.agent/guard-kept.txt');
 fs.writeFileSync('.agent/guard.json', JSON.stringify({ violations, kept }, null, 2));
 console.log(JSON.stringify({ violations, kept }));
 EOF
