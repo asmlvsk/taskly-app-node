@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Edit(./.github/**)",
+      "Edit(./.claude/**)",
+      "Edit(./backend/src/**)",
+      "Edit(./backend/package.json)",
+      "Edit(./backend/package-lock.json)",
+      "Edit(./backend/vitest.config.ts)",
+      "Edit(./frontend/package.json)",
+      "Edit(./frontend/package-lock.json)",
+      "Edit(./frontend/vite.config.ts)",
+      "Bash(git push*)",
+      "Bash(git commit*)",
+      "Bash(npm install*)",
+      "Bash(npm i *)",
+      "Bash(npx prisma*)",
+      "Bash(curl*)",
+      "Bash(wget*)",
+      "Bash(rm -rf*)"
+    ]
+  }
+}

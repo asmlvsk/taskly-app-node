@@ -1,0 +1,180 @@
+name: Test agent
+
+# Runs the custom `test-engineer` agent on every pull request from this repository:
+# analyzes the changed source files, creates or updates unit tests, verifies them
+# independently of the agent, commits them to the PR branch and posts a report.
+#
+# Security model (see SOLUTION.md):
+# - `pull_request` (never `pull_request_target`): the PR's code runs with a
+#   token scoped to this repository and only for branches of this repository.
+# - Fork PRs and drafts are skipped; secrets are never exposed to fork code.
+# - The agent runs with `--permission-mode dontAsk` and an explicit allow list:
+#   it can only edit test paths and run test/typecheck/git-read commands.
+# - A guard step reverts anything outside the allow list before verification,
+#   and verification + commit happen in plain shell, not by the agent.
+# - Commits are made with GITHUB_TOKEN, which does not re-trigger this workflow.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: test-agent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CI: "1"
+  DISABLE_AUTOUPDATER: "1"
+  DISABLE_TELEMETRY: "1"
+  DISABLE_ERROR_REPORTING: "1"
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+  CLAUDE_CODE_VERSION: "2.1.296"
+  AGENT_MODEL: ${{ vars.TEST_AGENT_MODEL || 'claude-sonnet-5-5' }}
+  AGENT_MAX_TURNS: ${{ vars.TEST_AGENT_MAX_TURNS || '120' }}
+  AGENT_MAX_BUDGET_USD: ${{ vars.TEST_AGENT_MAX_BUDGET_USD || '5' }}
+
+jobs:
+  tests:
+    name: Analyze, write and verify tests
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Check out the pull request branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Skip when the head commit was made by this workflow
+        id: loop
+        run: |
+          if git log -1 --format=%s | grep -q '\[test-agent\]'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect changed source files
+        id: changes
+        if: steps.loop.outputs.skip == 'false'
+        run: .github/scripts/changed-files.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+
+      - name: Report that there is nothing to test
+        if: steps.loop.outputs.skip == 'false' && steps.changes.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .agent
+          node .github/scripts/render-comment.mjs --nothing-to-test > .agent/comment.md
+          .github/scripts/post-comment.sh "${{ github.event.pull_request.number }}" .agent/comment.md
+          cat .agent/comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v5
+        if: steps.changes.outputs.count != '0'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install dependencies
+        if: steps.changes.outputs.count != '0'
+        run: |
+          (cd backend && npm ci)
+          (cd frontend && npm ci)
+
+      - name: Record baseline test results and coverage
+        if: steps.changes.outputs.count != '0'
+        id: baseline
+        run: .github/scripts/verify.sh baseline
+
+      - name: Install Claude Code
+        if: steps.changes.outputs.count != '0'
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Run the test-engineer agent
+        if: steps.changes.outputs.count != '0'
+        id: agent
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: .github/scripts/run-agent.sh
+
+      - name: Enforce the test-only path policy
+        if: steps.changes.outputs.count != '0'
+        id: guard
+        run: .github/scripts/guard-paths.sh
+
+      - name: Format generated frontend tests
+        if: steps.changes.outputs.count != '0' && steps.guard.outputs.changed == 'true'
+        run: |
+          files=$(git status --porcelain --untracked-files=all -- frontend/src | awk '{print $2}' | sed 's#^frontend/##')
+          if [ -n "$files" ]; then (cd frontend && echo "$files" | xargs npx prettier --write); fi
+
+      - name: Verify the test suites after the agent
+        if: steps.changes.outputs.count != '0'
+        id: verify
+        run: .github/scripts/verify.sh after
+
+      - name: Commit and push verified tests
+        if: steps.changes.outputs.count != '0' && steps.guard.outputs.changed == 'true' && steps.verify.outputs.ok == 'true'
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- backend/tests 'frontend/src/**/*.test.ts' 'frontend/src/**/*.test.tsx' frontend/src/test frontend/src/design-system/mocks.tsx
+          git commit -m "test: add and update unit tests for PR #${{ github.event.pull_request.number }} [test-agent]" \
+                     -m "Generated by the test-engineer agent (.claude/agents/test-engineer.md) and verified by .github/scripts/verify.sh."
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger an independent CI run on the new commit
+        if: steps.commit.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref "${{ github.event.pull_request.head.ref }}" || echo "::warning::Could not dispatch ci.yml"
+
+      - name: Post the report to the pull request
+        if: always() && steps.changes.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ steps.commit.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          AGENT_OUTCOME: ${{ steps.agent.outcome }}
+        run: |
+          node .github/scripts/render-comment.mjs > .agent/comment.md
+          .github/scripts/post-comment.sh "${{ github.event.pull_request.number }}" .agent/comment.md
+          cat .agent/comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the unverified patch when nothing was committed
+        if: always() && steps.changes.outputs.count != '0' && steps.commit.outputs.sha == ''
+        run: git add -N . && git diff > .agent/unverified-changes.patch || true
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.changes.outputs.count != '0'
+        with:
+          name: test-agent-run
+          path: |
+            .agent/
+            backend/coverage/coverage-summary.json
+            frontend/coverage/coverage-summary.json
+          retention-days: 14
+
+      - name: Fail the check when verification failed
+        if: steps.changes.outputs.count != '0' && steps.verify.outputs.ok != 'true'
+        run: |
+          echo "::error::Test verification failed after the agent run; nothing was committed. See the PR comment and the test-agent-run artifact."
+          exit 1

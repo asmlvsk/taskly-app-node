@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TestAgentReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "decisions", "skillsUsed", "filesChanged", "results", "notes"],
+  "properties": {
+    "summary": { "type": "string", "maxLength": 600 },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "action", "reason"],
+        "properties": {
+          "path": { "type": "string" },
+          "action": { "type": "string", "enum": ["create", "update", "skip"] },
+          "testFile": { "type": "string" },
+          "reason": { "type": "string", "maxLength": 300 }
+        }
+      }
+    },
+    "skillsUsed": { "type": "array", "items": { "type": "string" } },
+    "filesChanged": { "type": "array", "items": { "type": "string" } },
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "frontend"],
+      "properties": {
+        "backend": { "$ref": "#/$defs/packageResult" },
+        "frontend": { "$ref": "#/$defs/packageResult" }
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string", "maxLength": 500 } }
+  },
+  "$defs": {
+    "packageResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ran"],
+      "properties": {
+        "ran": { "type": "boolean" },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "coverageLinesBefore": { "type": "number" },
+        "coverageLinesAfter": { "type": "number" }
+      }
+    }
+  }
+}
