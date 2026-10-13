@@ -80,7 +80,39 @@ Execution path in CI: `run-agent.sh` → `claude -p --agent test-engineer` (skil
 
 ## 4. Example runs
 
-<!-- EXAMPLE_RUNS -->
+All runs below were made with the same agent, skills and scripts that the workflow uses, through `run-agent.sh`. Raw CLI output, prompts and reports are kept in the `test-agent-run` artifact in CI; for the local runs the reports are reproduced here.
+
+### Run 1: backend coverage backfill (local, `backfill-prompt.md`)
+
+Scope: `factory.ts`, `api/health.ts`, `core/config.ts`, `core/database.ts`, `core/lifespan.ts`, `features/todos/router.ts`. Model `claude-opus-5-5`, 39 turns, 118 s, $0.64, 1 denied tool call (the agent tried `python3` to read a coverage summary; the allow list refused it and the agent used the Read tool instead).
+
+Agent decisions (from the structured report):
+
+| Source file | Action | Test file | Reason (abridged) |
+| --- | --- | --- | --- |
+| `core/config.ts` | create | `tests/config.test.ts` | 0% covered: override, `DATABASE_URL`, `postgresql+psycopg` rewrite, missing-variable and URL-encoding branches |
+| `core/database.ts` | create | `tests/database.test.ts` | `initialize()` never run; `createDatabase` already exercised by repository tests |
+| `api/health.ts` | create | `tests/health.test.ts` | no test; must not report ok when the database probe fails |
+| `features/todos/router.ts` | update | `tests/router.test.ts` | only list/create covered (17% branches); added GET/PATCH/DELETE by id, 404s, invalid id and patch → 422 with the store not called |
+| `factory.ts` | create | `tests/factory.test.ts` | 0%: router mounting, `/openapi.json`, `/docs`, JSON 404, malformed JSON → 422, oversized body → 413, generic 500 with `console.error` silenced |
+| `core/lifespan.ts` | create | `tests/lifespan.test.ts` | 0%: connect/initialize/listen, default port, disconnect + rethrow on failures, SIGTERM/SIGINT shutdown, forced exit after 10 s; no real port or signal handlers |
+
+Skills used: `analyze-changes`, `write-backend-tests`, `verify-tests`, `report-results`.
+
+Independent verification by `verify.sh after` (what the workflow would commit on):
+
+| Package | Typecheck | Tests | Lines | Branches |
+| --- | --- | --- | --- | --- |
+| backend | ✅ | 89 passed, 0 failed | 33.0% → **97.2%** | 33.3% → **97.9%** |
+| frontend | ✅ | 18 passed (untouched) | 47.7% | 43.8% |
+
+Notes the agent reported: one remaining uncovered branch (`factory.ts`, error after headers were sent) deliberately left because it would need a contrived route; `main.ts` out of scope by rule; `config.ts` tests snapshot and restore `process.env` so a local `.env` can never influence them; existing assertions untouched; no embedded instructions found. Guard: 0 violations. Committed as `test(backend): … [test-agent]`.
+
+Two earlier attempts of this same run are worth recording because they show the fail-safe behaviour:
+- Attempt 1 failed before the agent started: the report schema used JSON Schema 2020-12 keywords the CLI validator rejects. The pipeline still produced a report ("the agent did not return a structured report") and would have posted it.
+- Attempt 2 ran, but every `cd backend && npm …` command was denied (Claude Code checks compound commands per segment, and the headless shell keeps its working directory between calls). The agent wrote one test file, **could not run it, reverted it on its own, and reported honestly**: "No tests were added … I reverted my one unverified edit". The allow list and skills were then changed to `npm --prefix <pkg> run …` forms.
+
+<!-- EXAMPLE_RUNS_MORE -->
 
 ## 5. Assumptions
 
