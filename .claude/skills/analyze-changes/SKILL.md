@@ -5,7 +5,7 @@ description: Decide which changed source files in a diff need new or updated uni
 
 # Analyze changes
 
-Turn a list of changed files into explicit test decisions. Every source file gets exactly one decision: `create`, `update`, or `skip`, with a one-sentence reason.
+Turn a list of changed files into explicit test decisions. Every source file gets exactly one decision: `create`, `update`, `delete`, or `skip`, with a one-sentence reason.
 
 ## Inputs
 
@@ -39,6 +39,11 @@ Decide `skip` (and say why) when:
 - the change is comments, formatting, or renames with no behaviour change;
 - the file is a test, fixture, or mock itself (tests are reviewed, not re-tested);
 - it only wires other units together with no logic of its own and those units are tested (e.g. `App.tsx` already has a composition test).
+
+Decide `delete` (deleted or renamed-away source files only) when:
+- the source module no longer exists and its test file only tests that module. Remove the test with `git rm <test file>` (the only deletion the workflow accepts; it re-checks that the source is really gone).
+- For a rename, prefer `update` of the test (fix the import, move it next to the new path by creating the new test and `git rm` of the old one) over deleting coverage.
+- If the test also covers other, still existing modules, `update` it to drop only the stale cases.
 
 When unsure between `update` and `skip`, read the existing test and check whether it still passes against the diff; prefer `update` if the new behaviour is observable.
 

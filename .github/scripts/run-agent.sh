@@ -6,12 +6,33 @@
 # Reads .agent/changed-files.txt and .agent/baseline-verify.json.
 # Writes .agent/<prefix>-output.json (raw CLI output), .agent/<prefix>-stderr.log and .agent/report.json.
 # Locally, without ANTHROPIC_API_KEY, the CLI falls back to the logged-in Claude account.
+#
+# Secret isolation: the agent runs `npm test`, i.e. code from the pull request. With
+# CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 Claude Code strips ANTHROPIC_API_KEY and other cloud
+# credentials from every Bash subprocess and runs it in a bubblewrap sandbox (needs
+# `bwrap` and `socat`). Without it a test can simply read process.env.ANTHROPIC_API_KEY.
+# Set AGENT_ENV_SCRUB=0 only for local experiments on a machine without bubblewrap.
 set -uo pipefail
 
 mkdir -p .agent
 : "${BASE_SHA:?}" "${HEAD_SHA:?}"
 : "${AGENT_MODEL:=claude-sonnet-5-5}" "${AGENT_MAX_TURNS:=120}" "${AGENT_MAX_BUDGET_USD:=5}"
-: "${PROMPT_TEMPLATE:=.github/agent/prompt.md}" "${OUTPUT_PREFIX:=agent}"
+: "${PROMPT_TEMPLATE:=.github/agent/prompt.md}" "${OUTPUT_PREFIX:=agent}" "${AGENT_ENV_SCRUB:=1}"
+
+if [ "$AGENT_ENV_SCRUB" = "1" ]; then
+  for tool in bwrap socat; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      echo "::error::$tool is required for the sandboxed agent run (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1)."
+      exit 1
+    fi
+  done
+  export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1
+else
+  echo "::warning::AGENT_ENV_SCRUB=0: test code started by the agent can read the API key."
+  export CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=0
+fi
+# Scrub mode leaves empty placeholder configs behind; remove them whatever happens.
+trap '.github/scripts/clean-sandbox-stubs.sh || true' EXIT
 
 if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -n "${GITHUB_ACTIONS:-}" ]; then
   echo "::error::ANTHROPIC_API_KEY secret is not set; the agent cannot run."
@@ -24,8 +45,11 @@ if [ -f .agent/baseline-verify.json ]; then
 fi
 
 changed=$(sed 's/^/- /' .agent/changed-files.txt)
+deleted="(none)"
+if [ -s .agent/deleted-files.txt ]; then deleted=$(sed 's/^/- /' .agent/deleted-files.txt); fi
 prompt=$(sed -e "s|{{BASE_SHA}}|$BASE_SHA|g" -e "s|{{HEAD_SHA}}|$HEAD_SHA|g" -e "s|{{BASELINE_STATUS}}|$baseline_status|g" "$PROMPT_TEMPLATE")
 prompt="${prompt//\{\{CHANGED_FILES\}\}/$changed}"
+prompt="${prompt//\{\{DELETED_FILES\}\}/$deleted}"
 printf '%s\n' "$prompt" > ".agent/$OUTPUT_PREFIX-prompt.txt"
 
 # Skills and the report contract are appended to the agent's system prompt explicitly.
@@ -69,6 +93,9 @@ allowed=(
   "Bash(npm --prefix backend run typecheck)" "Bash(npm --prefix backend run test*)"
   "Bash(npm --prefix frontend run typecheck)" "Bash(npm --prefix frontend run test*)"
   "Bash(npm --prefix frontend exec -- prettier --check*)"
+  # Removing a test whose source file was deleted. guard-paths.sh re-checks every
+  # deletion and restores anything that is not a stale test.
+  "Bash(git rm backend/tests/*)" "Bash(git rm frontend/src/*)"
 )
 
 set +e

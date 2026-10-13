@@ -1,0 +1,8 @@
+{
+  "name": "taskly-app-node",
+  "private": true,
+  "description": "Repository root. The packages live in backend/ and frontend/. This file must exist: the test agent's sandbox stubs out missing root configs with empty files, and an empty package.json breaks Vite and Vitest config resolution.",
+  "scripts": {
+    "test:scripts": "node --test \".github/scripts/__tests__/*.test.mjs\""
+  }
+}

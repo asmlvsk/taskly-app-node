@@ -33,7 +33,8 @@ ${runUrl ? `\n[Workflow run](${runUrl})` : ''}`)
 const report = read('.agent/report.json') ?? {}
 const baseline = read('.agent/baseline-verify.json')
 const after = read('.agent/after-verify.json')
-const guard = read('.agent/guard.json') ?? { violations: [], kept: [] }
+const guard = { violations: [], kept: [], deleted: [], ...(read('.agent/guard.json') ?? {}) }
+const ratchet = read('.agent/coverage-check.json')
 const commitSha = process.env.COMMIT_SHA || ''
 const agentOutcome = process.env.AGENT_OUTCOME || 'unknown'
 
@@ -41,6 +42,7 @@ const verifyOk = after && ['backend', 'frontend'].every((p) => after[p]?.typeche
 const changed = guard.kept.length > 0
 let status
 if (!after) status = '⚠️ Verification did not run'
+else if (verifyOk && ratchet && !ratchet.ok) status = '❌ Tests are green, but coverage is below the base branch'
 else if (verifyOk && commitSha) status = '✅ Tests generated, verified and committed'
 else if (verifyOk && !changed) status = 'ℹ️ No test changes were needed'
 else if (verifyOk) status = '⚠️ Tests verified but not committed'
@@ -78,8 +80,22 @@ if (baseline) {
 }
 lines.push('')
 
+if (ratchet) {
+  const rows = Object.entries(ratchet.packages ?? {}).filter(([, e]) => e.checked)
+  if (rows.length) {
+    lines.push(`### Coverage vs base branch (ratchet, tolerance ${ratchet.tolerance} pts)`, '')
+    lines.push('| Package | Lines base → PR | Branches base → PR | Result |', '| --- | --- | --- | --- |')
+    for (const [pkg, e] of rows) {
+      const cell = (m) => `${pct(m.base)} → ${pct(m.after)}${delta(m.base, m.after)}`
+      lines.push(`| ${pkg} | ${cell(e.lines)} | ${cell(e.branches)} | ${e.ok ? '✅' : '❌ dropped'} |`)
+    }
+    lines.push('')
+  }
+}
+
 lines.push('### Files', '')
-if (guard.kept.length) for (const f of guard.kept) lines.push(`- \`${f}\``)
+const deletedSet = new Set(guard.deleted)
+if (guard.kept.length) for (const f of guard.kept) lines.push(`- \`${f}\`${deletedSet.has(f) ? ' (deleted: stale test)' : ''}`)
 else lines.push('_No test files were changed._')
 if (guard.violations?.length) {
   lines.push('', '> 🛡️ Reverted changes outside the test allow list:')

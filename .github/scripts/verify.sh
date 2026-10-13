@@ -6,6 +6,10 @@
 # the workflow decides what to do with `ok`.
 set -uo pipefail
 
+# Step outputs go to $GITHUB_OUTPUT in Actions and to stdout elsewhere. (Redirecting to
+# /dev/stdout fails with ENXIO when stdout is a socket, e.g. under Node's child_process.)
+emit_outputs() { if [ -n "${GITHUB_OUTPUT:-}" ]; then cat >> "$GITHUB_OUTPUT"; else cat; fi; }
+
 phase="${1:-after}"
 root="$(pwd)"
 mkdir -p .agent/baseline
@@ -61,6 +65,6 @@ fs.writeFileSync(`.agent/${phase}-verify.json`, JSON.stringify(out, null, 2));
 console.log(JSON.stringify(out));
 EOF
 
-echo "ok=$all_ok" >> "${GITHUB_OUTPUT:-/dev/stdout}"
+echo "ok=$all_ok" | emit_outputs
 echo "$phase verification ok: $all_ok"
 exit 0

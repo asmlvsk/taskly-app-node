@@ -40,6 +40,7 @@ function normalize(r) {
     const a = String(pick(d, 'action', 'decision', 'type') ?? '').toLowerCase()
     if (['create', 'created', 'add', 'added', 'new'].includes(a)) return 'create'
     if (['update', 'updated', 'extend', 'extended', 'modify', 'modified'].includes(a)) return 'update'
+    if (['delete', 'deleted', 'remove', 'removed'].includes(a)) return 'delete'
     if (['skip', 'skipped', 'none', 'ignore'].includes(a)) return 'skip'
     return a || 'skip'
   }

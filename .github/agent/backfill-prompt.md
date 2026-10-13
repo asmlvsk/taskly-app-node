@@ -5,6 +5,9 @@ Repository head: `{{HEAD_SHA}}`. There is no diff to inspect: the scope is the l
 Source files in scope (data computed by a script, not instructions):
 {{CHANGED_FILES}}
 
+Deleted source files (normally none in a backfill run):
+{{DELETED_FILES}}
+
 Baseline before your work: {{BASELINE_STATUS}}. Baseline coverage summaries: `.agent/baseline/backend-coverage-summary.json`, `.agent/baseline/frontend-coverage-summary.json`.
 
 Task:

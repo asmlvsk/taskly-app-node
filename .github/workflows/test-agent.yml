@@ -1,27 +1,36 @@
 name: Test agent
 
-# Runs the custom `test-engineer` agent on every pull request from this repository:
-# analyzes the changed source files, creates or updates unit tests, verifies them
-# independently of the agent, commits them to the PR branch and posts a report.
+# Runs the custom `test-engineer` agent on pull requests from this repository:
+# analyzes the changed source files, creates, updates or removes unit tests, verifies
+# them independently of the agent, commits them to the PR branch and posts a report.
 #
-# Security model (see SOLUTION.md):
-# - `pull_request` (never `pull_request_target`): the PR's code runs with a
-#   token scoped to this repository and only for branches of this repository.
-# - Fork PRs and drafts are skipped; secrets are never exposed to fork code.
-# - The agent runs with `--permission-mode dontAsk` and an explicit allow list:
-#   it can only edit test paths and run test/typecheck/git-read commands.
-# - A guard step reverts anything outside the allow list before verification,
-#   and verification + commit happen in plain shell, not by the agent.
-# - Commits are made with GITHUB_TOKEN, which does not re-trigger this workflow.
+# Security model (details in SOLUTION.md):
+# - `pull_request`, never `pull_request_target`; fork PRs are not served.
+# - Opt-out with the `skip-test-agent` label; manual re-run with workflow_dispatch
+#   (only users with write access can dispatch).
+# - Actions pinned by commit SHA. Checkout does not persist the token; GITHUB_TOKEN is
+#   only given to the steps that push or comment, never to steps that run PR code.
+# - The API key is only present in the agent step, and Claude Code strips it from every
+#   subprocess it starts (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1, bubblewrap sandbox).
+# - The agent has an explicit tool allow list; guard-paths.sh restores anything outside
+#   the test paths; verification, the coverage ratchet and the commit run in plain shell.
+# - Logs are redacted before they are uploaded as artifacts.
+# - Commits made with GITHUB_TOKEN do not trigger workflows, so the agent cannot loop.
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to (re)run the test agent on
+        required: true
+        type: number
 
 permissions: {}
 
 concurrency:
-  group: test-agent-${{ github.event.pull_request.number }}
+  group: test-agent-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: true
 
 env:
@@ -34,31 +43,80 @@ env:
   AGENT_MODEL: ${{ vars.TEST_AGENT_MODEL || 'claude-sonnet-5-5' }}
   AGENT_MAX_TURNS: ${{ vars.TEST_AGENT_MAX_TURNS || '120' }}
   AGENT_MAX_BUDGET_USD: ${{ vars.TEST_AGENT_MAX_BUDGET_USD || '5' }}
+  COVERAGE_TOLERANCE: ${{ vars.TEST_AGENT_COVERAGE_TOLERANCE || '0.1' }}
 
 jobs:
+  resolve:
+    name: Resolve pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      run: ${{ steps.pr.outputs.run }}
+      number: ${{ steps.pr.outputs.number }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      head_ref: ${{ steps.pr.outputs.head_ref }}
+    steps:
+      - name: Read the pull request and decide whether to run
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_INPUT: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            [[ "$PR_INPUT" =~ ^[0-9]+$ ]] || { echo "::error::pr_number must be a number"; exit 1; }
+            pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_INPUT")
+          else
+            pr=$(jq '.pull_request' "$GITHUB_EVENT_PATH")
+          fi
+          field() { jq -r "$1" <<<"$pr"; }
+          run=true; reason="ok"
+          if [ "$(field .head.repo.full_name)" != "$GITHUB_REPOSITORY" ]; then run=false; reason="fork pull requests are not served"
+          elif [ "$(field .state)" != "open" ]; then run=false; reason="pull request is not open"
+          elif [ "$EVENT_NAME" = "pull_request" ] && [ "$(field .draft)" = "true" ]; then run=false; reason="draft pull request"
+          elif [ "$EVENT_NAME" = "pull_request" ] && field '.labels[].name' | grep -qx 'skip-test-agent'; then run=false; reason="skip-test-agent label"
+          fi
+          echo "Run: $run ($reason)"
+          {
+            echo "run=$run"
+            echo "number=$(field .number)"
+            echo "base_sha=$(field .base.sha)"
+            echo "head_sha=$(field .head.sha)"
+            echo "head_ref=$(field .head.ref)"
+          } >> "$GITHUB_OUTPUT"
+          echo "Test agent: **$run** ($reason)" >> "$GITHUB_STEP_SUMMARY"
+
   tests:
     name: Analyze, write and verify tests
-    if: >-
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.draft == false
+    needs: resolve
+    if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
       contents: write
       pull-requests: write
-      actions: write
+      actions: write # only to dispatch ci.yml on the agent's commit
+    env:
+      PR_NUMBER: ${{ needs.resolve.outputs.number }}
+      BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
+      HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+      HEAD_REF: ${{ needs.resolve.outputs.head_ref }}
     steps:
-      - name: Check out the pull request branch
-        uses: actions/checkout@v5
+      - name: Check out the pull request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ needs.resolve.outputs.head_sha }}
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Skip when the head commit was made by this workflow
         id: loop
         run: |
-          if git log -1 --format=%s | grep -q '\[test-agent\]'; then
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && git log -1 --format=%s | grep -q '\[test-agent\]'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -67,19 +125,18 @@ jobs:
       - name: Collect changed source files
         id: changes
         if: steps.loop.outputs.skip == 'false'
-        run: .github/scripts/changed-files.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+        run: .github/scripts/changed-files.sh "$BASE_SHA" "$HEAD_SHA"
 
       - name: Report that there is nothing to test
         if: steps.loop.outputs.skip == 'false' && steps.changes.outputs.count == '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p .agent
           node .github/scripts/render-comment.mjs --nothing-to-test > .agent/comment.md
-          .github/scripts/post-comment.sh "${{ github.event.pull_request.number }}" .agent/comment.md
+          .github/scripts/post-comment.sh "$PR_NUMBER" .agent/comment.md
           cat .agent/comment.md >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         if: steps.changes.outputs.count != '0'
         with:
           node-version: 22
@@ -94,10 +151,25 @@ jobs:
           (cd backend && npm ci)
           (cd frontend && npm ci)
 
-      - name: Record baseline test results and coverage
+      - name: Record baseline test results and coverage of the PR head
         if: steps.changes.outputs.count != '0'
-        id: baseline
         run: .github/scripts/verify.sh baseline
+
+      - name: Measure coverage of the base branch
+        if: steps.changes.outputs.count != '0'
+        run: .github/scripts/base-coverage.sh "$BASE_SHA"
+
+      - name: Prepare the agent sandbox
+        if: steps.changes.outputs.count != '0'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap socat >/dev/null
+          # Ubuntu 24.04+ runners restrict unprivileged user namespaces via AppArmor;
+          # bubblewrap needs them to sandbox the agent's subprocesses.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --dev /dev --proc /proc true && echo "bubblewrap works"
 
       - name: Install Claude Code
         if: steps.changes.outputs.count != '0'
@@ -109,8 +181,6 @@ jobs:
         continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: .github/scripts/run-agent.sh
 
       - name: Enforce the test-only path policy
@@ -121,7 +191,7 @@ jobs:
       - name: Format generated frontend tests
         if: steps.changes.outputs.count != '0' && steps.guard.outputs.changed == 'true'
         run: |
-          files=$(git status --porcelain --untracked-files=all -- frontend/src | awk '{print $2}' | sed 's#^frontend/##')
+          files=$(git status --porcelain --untracked-files=all -- frontend/src | grep -v '^ \?D' | awk '{print $2}' | sed 's#^frontend/##')
           if [ -n "$files" ]; then (cd frontend && echo "$files" | xargs npx prettier --write); fi
 
       - name: Verify the test suites after the agent
@@ -129,24 +199,34 @@ jobs:
         id: verify
         run: .github/scripts/verify.sh after
 
+      - name: Coverage ratchet against the base branch
+        if: steps.changes.outputs.count != '0'
+        id: ratchet
+        run: node .github/scripts/check-coverage.mjs
+
       - name: Commit and push verified tests
         if: steps.changes.outputs.count != '0' && steps.guard.outputs.changed == 'true' && steps.verify.outputs.ok == 'true'
         id: commit
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # The guard step already reverted everything outside the test allow list.
+          # The guard step already restored everything outside the test allow list.
           git add -A -- backend/tests frontend/src
-          git commit -m "test: add and update unit tests for PR #${{ github.event.pull_request.number }} [test-agent]" \
-                     -m "Generated by the test-engineer agent (.claude/agents/test-engineer.md) and verified by .github/scripts/verify.sh."
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          git commit -q -m "test: add and update unit tests for PR #${PR_NUMBER} [test-agent]" \
+                        -m "Generated by the test-engineer agent (.claude/agents/test-engineer.md) and verified by .github/scripts/verify.sh."
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$HEAD_REF"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Trigger an independent CI run on the new commit
         if: steps.commit.outputs.sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run ci.yml --ref "${{ github.event.pull_request.head.ref }}" || echo "::warning::Could not dispatch ci.yml"
+        run: gh workflow run ci.yml --ref "$HEAD_REF" || echo "::warning::Could not dispatch ci.yml"
 
       - name: Post the report to the pull request
         if: always() && steps.changes.outputs.count != '0'
@@ -157,14 +237,24 @@ jobs:
           AGENT_OUTCOME: ${{ steps.agent.outcome }}
         run: |
           node .github/scripts/render-comment.mjs > .agent/comment.md
-          .github/scripts/post-comment.sh "${{ github.event.pull_request.number }}" .agent/comment.md
+          .github/scripts/post-comment.sh "$PR_NUMBER" .agent/comment.md
           cat .agent/comment.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Save the unverified patch when nothing was committed
         if: always() && steps.changes.outputs.count != '0' && steps.commit.outputs.sha == ''
         run: git add -N . && git diff > .agent/unverified-changes.patch || true
 
-      - uses: actions/upload-artifact@v4
+      - name: Redact secrets from the run artifacts
+        if: always() && steps.changes.outputs.count != '0'
+        env:
+          REDACT_VALUES: |
+            ${{ secrets.ANTHROPIC_API_KEY }}
+            ${{ github.token }}
+        run: |
+          rm -rf .agent/base-tree
+          node .github/scripts/redact.mjs .agent backend/coverage frontend/coverage
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && steps.changes.outputs.count != '0'
         with:
           name: test-agent-run
@@ -174,8 +264,14 @@ jobs:
             frontend/coverage/coverage-summary.json
           retention-days: 14
 
-      - name: Fail the check when verification failed
-        if: steps.changes.outputs.count != '0' && steps.verify.outputs.ok != 'true'
+      - name: Fail the check when verification or the coverage ratchet failed
+        if: steps.changes.outputs.count != '0' && (steps.verify.outputs.ok != 'true' || steps.ratchet.outputs.ok != 'true')
         run: |
-          echo "::error::Test verification failed after the agent run; nothing was committed. See the PR comment and the test-agent-run artifact."
+          if [ "${{ steps.verify.outputs.ok }}" != "true" ]; then
+            echo "::error::Test verification failed after the agent run; nothing was committed."
+          fi
+          if [ "${{ steps.ratchet.outputs.ok }}" != "true" ]; then
+            echo "::error::Coverage is below the base branch even after the agent run."
+          fi
+          echo "See the PR comment and the test-agent-run artifact."
           exit 1

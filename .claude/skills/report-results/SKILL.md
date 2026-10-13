@@ -28,7 +28,7 @@ The final answer must be a single JSON object matching `.github/agent/report.sch
 ```
 
 Rules:
-- `decisions` has one entry per changed source file considered, including `skip` rows with reasons. `action` is `create`, `update` or `skip`.
+- `decisions` has one entry per changed source file considered, including `skip` rows with reasons. `action` is `create`, `update`, `delete` or `skip`. List deleted test files in `filesChanged` too.
 - `filesChanged` lists only test, fixture and mock files you actually wrote or edited, relative to the repository root.
 - `results.<package>.ran` is `false` when you did not touch that package; omit the counters then.
 - Coverage numbers are `total.lines.pct` from `coverage/coverage-summary.json`; "before" comes from `.agent/baseline/` when present, otherwise omit it.
