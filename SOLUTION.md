@@ -150,7 +150,66 @@ Notes worth keeping from the report: two remaining uncovered lines are unreachab
 
 Total agent cost for the backfill: about $2.90 and 10 minutes of wall time. No application source file was modified by the agent in any run.
 
-<!-- EXAMPLE_RUNS_MORE -->
+### Run 4: the PR workflow on the demo feature branch (`prompt.md`, CI defaults)
+
+Branch `feat/clear-completed` adds a "clear all completed tasks" feature across the stack (`DELETE /api/todos/completed`, `TodoRepository.deleteCompleted`, `todosApi.clearCompleted`, `useClearCompletedMutation`, a button in `TodosHeader`, wiring in `TodosPage`) and deliberately ships without behaviour tests. The workflow steps were executed with the same scripts the GitHub job runs, in order: `changed-files.sh` (6 source files selected; `types.ts`, `queryKeys.ts`, `openapi.json` and the PR's own test adjustments filtered out) → `verify.sh baseline` (green, but coverage dropped to 95.5% / 92.2% because of the untested code) → `run-agent.sh` with the CI defaults (`claude-sonnet-5-5`, 120 turns, $5 cap) → `guard-paths.sh` → Prettier → `verify.sh after` → commit → `render-comment.mjs`.
+
+Agent run: 22 turns, 67 s, $0.28, 1 denied tool call (the agent tried to rewrite a test with a `python3` heredoc; denied, it used the Edit tool instead). Six decisions (5 `update`, 1 `create`), all six files verified, committed as `test: add and update unit tests for PR feat/clear-completed [test-agent]`.
+
+The comment the workflow posts on the pull request, exactly as rendered by `render-comment.mjs`:
+
+<details>
+<summary>Rendered PR comment</summary>
+
+#### 🧪 Test agent report
+
+**✅ Tests generated, verified and committed**
+
+Added tests for the new 'clear completed tasks' feature on the backend and frontend. Both full suites pass: backend 91 tests, frontend 105. Typecheck and Prettier checks are clean.
+
+Committed as [`3bfc877`](https://github.com/asmlvsk/taskly-app-node/commit/3bfc877ce1238b3592c370e4f79992f073f1a63f).
+
+##### Decisions
+
+| Source file | Action | Test file | Reason |
+| --- | --- | --- | --- |
+| `backend/src/features/todos/repository.ts` | update | `backend/tests/repository.test.ts` | New deleteCompleted() needs a test for its deleteMany filter and returned count. |
+| `backend/src/features/todos/router.ts` | update | `backend/tests/router.test.ts` | New DELETE /completed route needs a test for its 200 {deleted} response and that 'completed' is not parsed as an id. |
+| `frontend/src/features/todos/TodosPage.tsx` | update | `frontend/src/features/todos/TodosPage.test.tsx` | New clear flow with singular/plural notices, no-op guards (nothing completed, busy) and error alert. The mocked header and mockPage were extended. |
+| `frontend/src/features/todos/api/todos.ts` | update | `frontend/src/features/todos/api/todos.test.ts` | New clearCompleted endpoint call needs a test. |
+| `frontend/src/features/todos/components/TodosHeader.tsx` | update | `frontend/src/features/todos/components/TodosHeader.test.tsx` | Clear button is shown only when completedCount > 0, and is blocked when disabled. |
+| `frontend/src/features/todos/hooks/useClearCompletedMutation.ts` | create | `frontend/src/features/todos/hooks/useClearCompletedMutation.test.ts` | New hook with cache filtering on success; needs tests for the empty cache and failure cases. |
+
+##### Verification (run by the workflow, not by the agent)
+
+| Package | Typecheck | Tests | Passed | Failed | Lines | Branches |
+| --- | --- | --- | --- | --- | --- | --- |
+| backend | ✅ | ✅ | 91 | 0 | 97.3% (+1.8) | 97.9% (±0) |
+| frontend | ✅ | ✅ | 105 | 0 | 99.4% (+7.2) | 98.6% (+4.8) |
+
+##### Files
+
+- `backend/tests/repository.test.ts`
+- `backend/tests/router.test.ts`
+- `frontend/src/features/todos/TodosPage.test.tsx`
+- `frontend/src/features/todos/api/todos.test.ts`
+- `frontend/src/features/todos/components/TodosHeader.test.tsx`
+- `frontend/src/features/todos/hooks/useClearCompletedMutation.test.ts`
+
+**Skills used:** `analyze-changes`, `write-backend-tests`, `write-frontend-tests`, `verify-tests`, `report-results`  
+**Agent run:** 22 turns, 67s, $0.28, 1 denied tool call(s) (success)
+
+##### Notes from the agent
+
+- The PR's own edit to TodosPage.test.tsx only mocked useClearCompletedMutation in one test. I extended the shared mockPage helper so the other tests also get a return value for the hook. I also changed the TodosHeader mock so it exposes the clear button, which let me test the page's clear() logic.
+- No instructions aimed at the agent were found in the diff.
+
+<sub>Agent: `.claude/agents/test-engineer.md` · Skills: `.claude/skills/*` · Workflow: `.github/workflows/test-agent.yml` · [Run](https://github.com/asmlvsk/taskly-app-node/actions)</sub>
+
+</details>
+
+An earlier attempt of this run (before the skill-injection fix) produced equally green tests but reported "I could not see the skill files" and returned the report with different key names; that attempt is what led to the explicit `--append-system-prompt-file` injection and the key normalization in `extract-report.mjs`. The live run of this workflow on GitHub is attached to the pull request of the `feat/clear-completed` branch in this repository.
+
 
 ## 5. Assumptions
 
