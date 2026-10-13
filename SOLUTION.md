@@ -127,6 +127,28 @@ Skills used: `analyze-changes`, `write-frontend-tests`, `verify-tests`, `report-
 
 Notes the agent reported: Prettier fails on the pre-existing `ApplicationHeader.test.tsx`, which it deliberately did not touch (fixed afterwards by hand in a separate `chore` commit, together with `index.html`); no source bugs found; no existing expectations weakened; remaining gaps listed for a follow-up run. Guard: 0 violations; Prettier check on all generated files: clean.
 
+### Run 3: frontend backfill, part B (local, `backfill-prompt.md`)
+
+Scope: `TodosPage.tsx` and the six components (`DeleteTodoDialog`, `TodoEditor`, `TodoEmptyState`, `TodoForm`, `TodoItem`, `TodoList`). Model `claude-opus-5-5`, 56 turns, 253 s, $1.27, 2 denied tool calls (`python3`, and a `… | grep | tail` pipeline whose extra segments are not on the allow list; the agent re-ran the plain command).
+
+Decisions: 1 `create` (`TodoEmptyState`) and 6 `update`. In three existing files (`TodoList`, `TodoEditor`, `TodosPage` tests) the agent changed only the child-component mocks so they can trigger callbacks, and reported that explicitly; existing assertions are unchanged.
+
+| Package | Typecheck | Tests | Lines | Branches |
+| --- | --- | --- | --- | --- |
+| frontend | ✅ | 95 passed, 0 failed | 82.8% → **99.3%** | 72.3% → **98.5%** |
+| backend | ✅ | 89 passed (untouched) | 97.2% | 97.9% |
+
+Notes worth keeping from the report: two remaining uncovered lines are unreachable through the UI (a double guard in `DeleteTodoDialog`) or covered elsewhere (the header's create button, tested through `TodoList`); and a **skill correction**: the `write-frontend-tests` skill claimed `Drawer` was not mocked while `mocks.tsx` does mock it. The skill was fixed after this run. That is the intended feedback loop: the agent reports, a human curates the skills.
+
+### Overall effect of runs 1–3
+
+| Package | Tests before | Tests after | Lines before | Lines after | Branches before | Branches after |
+| --- | --- | --- | --- | --- | --- | --- |
+| backend | 48 | 89 | 33.0% | 97.2% | 33.3% | 97.9% |
+| frontend | 18 | 95 | 47.7% | 99.3% | 43.8% | 98.5% |
+
+Total agent cost for the backfill: about $2.90 and 10 minutes of wall time. No application source file was modified by the agent in any run.
+
 <!-- EXAMPLE_RUNS_MORE -->
 
 ## 5. Assumptions

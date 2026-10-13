@@ -24,7 +24,7 @@ Every component test that renders design-system components must mock the barrel 
 vi.mock('../../../design-system', () => import('../../../design-system/mocks'))
 ```
 
-Keep the relative path correct for the file's depth. The mocks render native elements: `Alert` → `div[data-testid="alert"]`, `Input`/`Select` → `<label>` wrapping a native control, `Drawer` is **not** mocked (it is a real `<dialog>`; `getByRole('dialog', { name })` works).
+Keep the relative path correct for the file's depth. The mocks render native elements: `Alert` → `div[data-testid="alert"]`, `Input`/`Select` → `<label>` wrapping a native control, `Drawer` → `div[role="dialog"][aria-label=title]` with a `Close` button that is disabled while `busy` (so `getByRole('dialog', { name })` and `getByRole('button', { name: 'Close' })` work).
 
 ## Patterns by module
 
