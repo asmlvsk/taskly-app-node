@@ -9,7 +9,7 @@ Frontend tests are colocated next to the source as `<Name>.test.tsx` or `<name>.
 
 ## House style (Prettier enforced)
 
-- No semicolons, single quotes, trailing commas, 2-space indent, 80-column wrap. Run `npx prettier --check <file>` from `frontend/`; fix formatting by editing the file.
+- No semicolons, single quotes, trailing commas, 2-space indent, 80-column wrap. Run `npm --prefix frontend exec -- prettier --check frontend/src/<path>` from the repository root; fix formatting by editing the file.
 - Flat `it(...)`; `describe` only for several behaviours of one unit.
 - Fixture: `import { todoFixture } from '<rel>/test/todoFixture'`, extended with spread.
 - Query by role and accessible name first (`getByRole('button', { name: 'Save task' })`), then by label text, then by text. Avoid test ids except `alert` from the mocks.

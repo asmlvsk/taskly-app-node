@@ -10,7 +10,7 @@ Baseline before your work (recorded by the workflow): {{BASELINE_STATUS}}. Basel
 Task:
 1. Apply the `analyze-changes` skill to every file above and produce the decision table.
 2. For each `create`/`update` decision, write the tests with the `write-backend-tests` or `write-frontend-tests` skill.
-3. Verify with the `verify-tests` skill. Run package commands as `cd backend && …` or `cd frontend && …` from the repository root; only those command forms are permitted.
+3. Verify with the `verify-tests` skill. Run package commands from the repository root as `npm --prefix backend run …` / `npm --prefix frontend run …` (never `cd`); only the command forms listed in the skill are permitted.
 4. Finish with the `report-results` JSON as your only output.
 
 Constraints that the workflow also enforces mechanically: you may only change files under `backend/tests/`, `frontend/src/**/*.test.ts(x)`, `frontend/src/test/`, and `frontend/src/design-system/mocks.tsx`. Anything else is reverted. The workflow re-runs the full suites after you finish and will not commit a red suite, so do not leave failing tests behind.

@@ -7,14 +7,16 @@ description: Run typecheck, formatting check, the test suite and coverage for th
 
 Nothing is "done" until it has been executed. Verification is per package; run it for each package you touched, then once for both at the end.
 
-## Commands (run from the repository root)
+## Commands (always from the repository root, never `cd`)
 
 | Step | Backend | Frontend |
 | --- | --- | --- |
-| Type check | `cd backend && npm run typecheck` | `cd frontend && npm run typecheck` |
-| Format | n/a | `cd frontend && npx prettier --check <changed test files>` |
-| Single file | `cd backend && npx vitest run tests/<name>.test.ts` | `cd frontend && npx vitest run src/<path>/<Name>.test.tsx` |
-| Full suite + coverage | `cd backend && npm run test:coverage` | `cd frontend && npm run test:coverage` |
+| Type check | `npm --prefix backend run typecheck` | `npm --prefix frontend run typecheck` |
+| Format | n/a | `npm --prefix frontend exec -- prettier --check frontend/src/<path>/<Name>.test.tsx` |
+| Single file | `npm --prefix backend run test -- tests/<name>.test.ts` | `npm --prefix frontend run test -- src/<path>/<Name>.test.tsx` |
+| Full suite + coverage | `npm --prefix backend run test:coverage` | `npm --prefix frontend run test:coverage` |
+
+`npm run` paths are relative to the package (`tests/…`, `src/…`); the Prettier path is relative to the repository root (`frontend/src/…`). These are the only command forms the CI allow list accepts.
 
 Coverage summaries are written to `<package>/coverage/coverage-summary.json`. When a baseline exists at `.agent/baseline/<package>-coverage-summary.json` (the PR workflow creates it before you start), compare `total.lines.pct` and `total.branches.pct` with the new numbers and report both.
 
@@ -25,8 +27,8 @@ Coverage summaries are written to `<package>/coverage/coverage-summary.json`. Wh
    - **The test is wrong** (wrong selector, wrong mock shape, wrong expectation about behaviour you misread): fix the test.
    - **The code is wrong** (a genuine bug exposed by the diff): do **not** change source code. Keep the test only if you are certain the expectation is the documented behaviour; otherwise remove it and record the suspected bug in the report under `notes` so a human can decide.
 3. Never weaken a pre-existing assertion to make it pass. If an existing test fails because of the PR's intentional behaviour change, update it to describe the new behaviour and say so in the report.
-4. When the package compiles and the single files pass, run `npm run typecheck` and `npm run test:coverage` for the whole package. Backend coverage thresholds (100% for validators and mappers) must still hold.
-5. Frontend: run `npx prettier --check` on every test file you touched; fix by editing until it passes.
+4. When the package compiles and the single files pass, run the package type check and `test:coverage` for the whole package. Backend coverage thresholds (100% for validators and mappers) must still hold.
+5. Frontend: run the Prettier check on every test file you touched; fix by editing until it passes.
 6. If after two fix attempts a generated test still fails, delete that test case (not the whole file, unless it is empty) and report it as `skipped` with the failure reason. A red suite must never be left behind.
 7. Record the final numbers for the report: files, tests passed/failed, coverage before and after.
 

@@ -10,7 +10,7 @@ Baseline before your work: {{BASELINE_STATUS}}. Baseline coverage summaries: `.a
 Task:
 1. Apply the `analyze-changes` skill: for each file decide `create` (no test yet), `update` (a test exists but leaves branches uncovered) or `skip`, with a reason.
 2. Write the tests with `write-backend-tests` / `write-frontend-tests`, one file at a time, covering the uncovered branches that describe real behaviour. Do not pad with trivial tests.
-3. Verify with `verify-tests`. Run package commands as `cd backend && …` or `cd frontend && …` from the repository root; only those command forms are permitted.
+3. Verify with `verify-tests`. Run package commands from the repository root as `npm --prefix backend run …` / `npm --prefix frontend run …` (never `cd`); only the command forms listed in the skill are permitted.
 4. Finish with the `report-results` JSON as your only output.
 
 Constraints that are also enforced mechanically: you may only change files under `backend/tests/`, `frontend/src/**/*.test.ts(x)`, `frontend/src/test/`, and `frontend/src/design-system/mocks.tsx`. Never edit application source; if a source file looks buggy, keep the test honest and put the finding in `notes`. Do not leave a failing suite behind.

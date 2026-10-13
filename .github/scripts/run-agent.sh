@@ -36,10 +36,12 @@ allowed=(
   "Edit(frontend/src/**/*.test.ts)" "Edit(frontend/src/**/*.test.tsx)"
   "Edit(frontend/src/test/**)" "Edit(frontend/src/design-system/mocks.tsx)"
   "Bash(git diff*)" "Bash(git log*)" "Bash(git status*)" "Bash(git show*)" "Bash(ls*)"
-  "Bash(cd backend && npm run typecheck*)" "Bash(cd backend && npm run test*)" "Bash(cd backend && npm test*)"
-  "Bash(cd backend && npx vitest run*)"
-  "Bash(cd frontend && npm run typecheck*)" "Bash(cd frontend && npm run test*)" "Bash(cd frontend && npm test*)"
-  "Bash(cd frontend && npx vitest run*)" "Bash(cd frontend && npx prettier --check*)"
+  # No `cd`: the headless shell keeps its working directory between calls and compound
+  # commands are permission-checked per segment. Every package command runs from the
+  # repository root through `npm --prefix <pkg>`.
+  "Bash(npm --prefix backend run typecheck)" "Bash(npm --prefix backend run test*)"
+  "Bash(npm --prefix frontend run typecheck)" "Bash(npm --prefix frontend run test*)"
+  "Bash(npm --prefix frontend exec -- prettier --check*)"
 )
 
 set +e
