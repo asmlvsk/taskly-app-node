@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "TestAgentReport",
   "type": "object",
   "additionalProperties": false,
@@ -27,24 +26,32 @@
       "additionalProperties": false,
       "required": ["backend", "frontend"],
       "properties": {
-        "backend": { "$ref": "#/$defs/packageResult" },
-        "frontend": { "$ref": "#/$defs/packageResult" }
+        "backend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ran"],
+          "properties": {
+            "ran": { "type": "boolean" },
+            "passed": { "type": "integer", "minimum": 0 },
+            "failed": { "type": "integer", "minimum": 0 },
+            "coverageLinesBefore": { "type": "number" },
+            "coverageLinesAfter": { "type": "number" }
+          }
+        },
+        "frontend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ran"],
+          "properties": {
+            "ran": { "type": "boolean" },
+            "passed": { "type": "integer", "minimum": 0 },
+            "failed": { "type": "integer", "minimum": 0 },
+            "coverageLinesBefore": { "type": "number" },
+            "coverageLinesAfter": { "type": "number" }
+          }
+        }
       }
     },
     "notes": { "type": "array", "items": { "type": "string", "maxLength": 500 } }
-  },
-  "$defs": {
-    "packageResult": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["ran"],
-      "properties": {
-        "ran": { "type": "boolean" },
-        "passed": { "type": "integer", "minimum": 0 },
-        "failed": { "type": "integer", "minimum": 0 },
-        "coverageLinesBefore": { "type": "number" },
-        "coverageLinesAfter": { "type": "number" }
-      }
-    }
   }
 }
