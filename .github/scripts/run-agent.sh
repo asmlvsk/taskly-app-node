@@ -28,6 +28,32 @@ prompt=$(sed -e "s|{{BASE_SHA}}|$BASE_SHA|g" -e "s|{{HEAD_SHA}}|$HEAD_SHA|g" -e 
 prompt="${prompt//\{\{CHANGED_FILES\}\}/$changed}"
 printf '%s\n' "$prompt" > ".agent/$OUTPUT_PREFIX-prompt.txt"
 
+# Skills and the report contract are appended to the agent's system prompt explicitly.
+# `claude -p --agent` runs the agent as the main thread; in that mode the `skills:`
+# preload of the agent file and `--json-schema` are not applied (verified with
+# Claude Code 2.1.296), so the run must not depend on them.
+{
+  echo "# Preloaded skills"
+  echo
+  echo "The following skills are part of your instructions. Follow them in the order given by the agent definition: analyze-changes, write-backend-tests / write-frontend-tests, verify-tests, report-results."
+  for skill in analyze-changes write-backend-tests write-frontend-tests verify-tests report-results; do
+    echo
+    echo "---"
+    echo
+    echo "## Skill: $skill"
+    echo
+    sed '1{/^---$/,/^---$/d}' ".claude/skills/$skill/SKILL.md" | sed '/^---$/,/^---$/d'
+  done
+  echo
+  echo "---"
+  echo
+  echo "# Report contract"
+  echo
+  echo "Your final message must be exactly one JSON object and nothing else (no prose, no code fence), using exactly these top-level keys: summary, decisions, skillsUsed, filesChanged, results, notes. Each decision has the keys path, action (create|update|skip), testFile, reason. results has backend and frontend, each with ran and, when ran is true, passed, failed, coverageLinesBefore, coverageLinesAfter. JSON Schema:"
+  echo
+  cat .github/agent/report.schema.json
+} > ".agent/$OUTPUT_PREFIX-system-append.md"
+
 # Allow list: read-only exploration, edits restricted to test paths, and the exact
 # commands the skills use. Deny rules in .claude/settings.json still apply on top.
 allowed=(
@@ -54,6 +80,7 @@ claude -p "$prompt" \
   --max-budget-usd "$AGENT_MAX_BUDGET_USD" \
   --output-format json \
   --json-schema "$(cat .github/agent/report.schema.json)" \
+  --append-system-prompt-file ".agent/$OUTPUT_PREFIX-system-append.md" \
   --no-session-persistence \
   > ".agent/$OUTPUT_PREFIX-output.json" 2> ".agent/$OUTPUT_PREFIX-stderr.log"
 code=$?
