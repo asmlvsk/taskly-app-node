@@ -42,7 +42,8 @@ printf '%s\n' "$prompt" > ".agent/$OUTPUT_PREFIX-prompt.txt"
     echo
     echo "## Skill: $skill"
     echo
-    sed '1{/^---$/,/^---$/d}' ".claude/skills/$skill/SKILL.md" | sed '/^---$/,/^---$/d'
+    # Drop the YAML frontmatter (first '---' ... '---' block), keep the body.
+    awk 'NR == 1 && /^---$/ { fm = 1; next } fm && /^---$/ { fm = 0; next } !fm' ".claude/skills/$skill/SKILL.md"
   done
   echo
   echo "---"
