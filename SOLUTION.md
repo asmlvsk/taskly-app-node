@@ -112,6 +112,21 @@ Two earlier attempts of this same run are worth recording because they show the 
 - Attempt 1 failed before the agent started: the report schema used JSON Schema 2020-12 keywords the CLI validator rejects. The pipeline still produced a report ("the agent did not return a structured report") and would have posted it.
 - Attempt 2 ran, but every `cd backend && npm …` command was denied (Claude Code checks compound commands per segment, and the headless shell keeps its working directory between calls). The agent wrote one test file, **could not run it, reverted it on its own, and reported honestly**: "No tests were added … I reverted my one unverified edit". The allow list and skills were then changed to `npm --prefix <pkg> run …` forms.
 
+### Run 2: frontend backfill, part A (local, `backfill-prompt.md`)
+
+Scope: `lib/http.ts`, `utils/todos.ts`, `hooks/useNotice.ts`, `app/AppProviders.tsx`, `api/todos.ts` and the six todo hooks. Model `claude-opus-5-5`, 57 turns, 198 s, $0.95, 1 denied tool call (a `cd … && cat` loop; the agent switched to the Read tool).
+
+Decisions: 7 `create` (`http`, `AppProviders`, `useTodosQuery`, `useTodosBusy`, `useTodoFilters`, `useCreateTodoMutation`, `useUpdateTodoMutation`, `useDeleteTodoMutation`) and 3 `update` (`utils/todos`, `useNotice`, `api/todos`, each keeping the original cases and adding the uncovered branches). The agent also added one shared helper, `src/test/queryWrapper.tsx` (fresh `QueryClient` per test, retries off), which the `write-frontend-tests` skill allows under `src/test/**`.
+
+Skills used: `analyze-changes`, `write-frontend-tests`, `verify-tests`, `report-results`.
+
+| Package | Typecheck | Tests | Lines | Branches |
+| --- | --- | --- | --- | --- |
+| frontend | ✅ | 65 passed, 0 failed | 47.7% → **82.8%** | 43.8% → **72.3%** |
+| backend | ✅ | 89 passed (untouched) | 97.2% | 97.9% |
+
+Notes the agent reported: Prettier fails on the pre-existing `ApplicationHeader.test.tsx`, which it deliberately did not touch (fixed afterwards by hand in a separate `chore` commit, together with `index.html`); no source bugs found; no existing expectations weakened; remaining gaps listed for a follow-up run. Guard: 0 violations; Prettier check on all generated files: clean.
+
 <!-- EXAMPLE_RUNS_MORE -->
 
 ## 5. Assumptions
