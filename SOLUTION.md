@@ -20,7 +20,7 @@ Agent environment: **Claude Code** (CLI, headless `claude -p`), chosen because i
 | **Coverage ratchet against the base branch** | Green tests are not enough: `base-coverage.sh` measures the base commit in a temporary worktree (reusing `node_modules` when lock files match, about 3 s) and `check-coverage.mjs` fails the check if line or branch coverage of a package drops by more than 0.1 points. The tests are still committed when green; the failing check tells the reviewer the PR is under-tested. |
 | **Stale tests are handled, deletions are re-checked** | Deleted and renamed-away sources are passed to the agent separately. It may `git rm` a test only under a `delete` decision, and `guard-paths.sh` accepts a deletion only if the test is on the allow list and its source module is really gone. Shared helpers (`fixture.ts`, `src/test/**`, `mocks.tsx`) can never be deleted. |
 | **The automation is tested too** | 34 `node:test` tests in `.github/scripts/__tests__` cover the guard (allow list, staged deletions, stale tests, renames, paths with spaces), change detection, stub cleanup, report extraction and normalization, comment rendering, the ratchet and redaction. CI runs them with `shellcheck`. Mutating the guard's allow list or deletion rule makes them fail. |
-| **Commits via `GITHUB_TOKEN`** | Such pushes do not trigger new workflow runs, which rules out agent → push → agent loops by construction. A `[test-agent]` marker in the commit message is a second guard. An independent `CI` run is then dispatched explicitly with `gh workflow run`. |
+| **Commits via `GITHUB_TOKEN`** | The push is made as `github-actions[bot]`. The live run (run 6) showed that such a push *does* create `pull_request` runs, but GitHub parks them as "Action required" because the bot counts as a first-time contributor; what actually prevents an agent → push → agent loop is the `[test-agent]` marker in the commit message, which the workflow checks before doing anything. An independent `CI` run is dispatched explicitly with `gh workflow run` so the branch is always re-checked without manual approval. |
 | **Unit tests never need PostgreSQL** | Kept from the sample: repository tests spy on the real Prisma delegate without connecting. This keeps the workflow to `npm ci` + `vitest`, with no services and no secrets other than the API key. |
 
 ## 2. Running the PR workflow
@@ -28,7 +28,7 @@ Agent environment: **Claude Code** (CLI, headless `claude -p`), chosen because i
 ### Prerequisites
 
 1. A GitHub repository with Actions enabled and the default `GITHUB_TOKEN` allowed to **write** (Settings → Actions → General → Workflow permissions: "Read and write"). The workflow also declares `permissions:` explicitly.
-2. Repository secret **`ANTHROPIC_API_KEY`** (Anthropic Console key). It is the only secret the workflow uses.
+2. Repository secret **`ANTHROPIC_API_KEY`** (Anthropic Console key, with prepaid credit on the Console account: without it the agent fails in one turn, see run 6). It is the only secret the workflow uses.
 3. Optional repository variables: `TEST_AGENT_MODEL` (default `claude-sonnet-5-5`), `TEST_AGENT_MAX_TURNS` (default `120`), `TEST_AGENT_MAX_BUDGET_USD` (default `5`), `TEST_AGENT_COVERAGE_TOLERANCE` (default `0.1` points).
 4. Optional label **`skip-test-agent`**: a PR with this label is not processed.
 
@@ -66,10 +66,10 @@ A small `resolve` job reads the PR (from the event, or from the API for a manual
 | A leaked secret is published in an artifact | `redact.mjs` masks the known secret values and common token formats in everything uploaded. |
 | Prompt injection in the diff makes the agent change source, CI or settings | Tool allow list and deny rules; the guard restores every path outside the test allow list after the agent, whatever it did; nothing the agent runs can commit or push. |
 | The agent "fixes" a test by weakening it, or leaves a red suite | Skill rules forbid it and the agent reports such cases; independently, the workflow re-runs everything and commits only a green suite, and the ratchet catches lost coverage. |
-| Runaway cost or loops | `--max-turns`, `--max-budget-usd`, job timeout, `cancel-in-progress` per PR, no re-trigger from `GITHUB_TOKEN` commits plus the `[test-agent]` loop guard. |
+| Runaway cost or loops | `--max-turns`, `--max-budget-usd`, job timeout, `cancel-in-progress` per PR, and the `[test-agent]` loop guard: a run whose head commit carries the marker exits before installing anything. |
 | Compromised or moved action tag | All actions pinned by commit SHA; Dependabot proposes updates. |
 
-Accepted risk: a collaborator with write access can change the workflow itself in their PR (that is true of every `pull_request` workflow). The model protects against untrusted *content* (dependencies, generated code, injected instructions), not against a malicious maintainer.
+Accepted risk: a collaborator with write access can change the workflow itself in their PR (that is true of every `pull_request` workflow), and the `tests` job checks out the PR head, so `.github/scripts/*`, the agent definition and the skills are taken from the PR branch, not from `main`. The model protects against untrusted *content* (dependencies, generated code, injected instructions), not against a malicious maintainer.
 
 ### Running the agent locally
 
@@ -324,6 +324,23 @@ Committed as `7db5fc1` (a local commit of this replay; in the live run the comme
 
 </details>
 
+### Run 6: the live run on GitHub (pull request #1)
+
+The same feature branch was pushed with the feature commit only and opened as [pull request #1](https://github.com/asmlvsk/taskly-app-node/pull/1). The `Test agent` workflow ran on GitHub Actions with the CI defaults (`claude-sonnet-5-5`, 120 turns, $5 cap, sandboxed subprocesses) and pushed [`df16513`](https://github.com/asmlvsk/taskly-app-node/commit/df16513f7e61aeb7fdb22420c5c726606b17e2b0) to the branch as `github-actions[bot]`: six test files, 190 added lines, the same six decisions as in runs 4 and 5. The sticky comment with the decision table, verification table, ratchet, skills, turns and cost is on the pull request itself; the `test-agent-run` artifact holds the redacted prompt, agent output and logs.
+
+The commit was checked once more outside the workflow, by running typecheck, Prettier and both suites with coverage on the pushed commit in a clean worktree:
+
+| Package | Typecheck | Tests | Lines (base → PR) | Branches (base → PR) |
+| --- | --- | --- | --- | --- |
+| backend | ✅ | 92 passed, 0 failed | 97.2% → 97.3% | 97.9% → 97.9% |
+| frontend | ✅, Prettier clean | 105 passed, 0 failed | 99.3% → 99.4% | 98.5% → 98.6% |
+
+Three things this run taught that the local replays could not:
+
+- **The first two attempts failed in one turn, $0.00, about 300 ms**, because the Anthropic Console behind the key had no prepaid credit. The pipeline behaved as designed (nothing committed, the ratchet flagged the untested PR), but the comment said "Agent run ended with success", which is the CLI's `subtype` and not the truth. `extract-report.mjs` and `render-comment.mjs` were fixed to carry the CLI's error message and to headline the agent failure; two tests cover it.
+- **The bot's push does create `pull_request` runs**, held as "Action required" until a maintainer approves them. Approving is safe: the `Test agent` run exits through the `[test-agent]` loop guard, and `CI` re-checks the branch. The explicit `gh workflow run ci.yml` dispatch already gave an independent green `CI` run without approval.
+- **Dependabot opened twelve dependency PRs** as soon as `dependabot.yml` landed. The test agent handled each in about 20 s with the "nothing to test" comment, which is the intended behaviour for non-source changes, and `CI` correctly failed the major Vite bump. For a demo repository the npm sections of `dependabot.yml` are better left off.
+
 ## 5. Assumptions
 
 - Pull requests come from branches of this repository (the normal flow for a team). Fork PRs are deliberately not served.
@@ -335,10 +352,12 @@ Committed as `7db5fc1` (a local commit of this replay; in the live run the comme
 ## 6. Limitations
 
 - **Prompt injection surface.** The agent reads the diff, which is untrusted. The mitigations are in the threat model (section 2). A hostile diff can still waste the budget or produce poor tests; it cannot change files outside the test paths, push, or reach the API key from a subprocess.
-- **The sandbox setup on GitHub runners is not yet proven by a live run.** Scrub mode, the sandbox and the stub cleanup were verified locally (Ubuntu 26.04, bubblewrap 0.11.1); the runner step that installs `bubblewrap`/`socat` and relaxes the AppArmor user-namespace restriction follows the documented requirements but was not executed on GitHub before submission. If it fails, `run-agent.sh` stops with a clear error instead of running unsandboxed.
+- **Scripts, agent and skills come from the PR branch.** The `tests` job checks out the PR head, so a fix to `.github/scripts/*` merged to `main` only reaches a PR after it is rebased or updated. The first live runs (run 6) used the scripts as they were on the PR branch. A production version would run the automation from the base branch.
+- **The sandbox depends on the runner.** Scrub mode, bubblewrap and the stub cleanup now work on `ubuntu-latest` (run 6) after the AppArmor user-namespace restriction is lifted in the job; a different runner image may need a different preparation step. If it fails, `run-agent.sh` stops with a clear error instead of running unsandboxed.
 - **Verification is the suite itself**, not a review of test quality. A trivial but green test would be committed. Coverage deltas in the comment make that visible; a human still reviews the commit.
 - **No automatic retry.** If the agent exceeds the turn or dollar budget, the run reports it and stops; a maintainer can re-run it with workflow_dispatch, and the next push starts over.
-- **Generated commits do not trigger `pull_request` workflows**, by GitHub design when using `GITHUB_TOKEN`. The workflow dispatches `ci.yml` explicitly to get an independent check, but third-party checks that listen to `pull_request` will not re-run for that commit.
+- **Runs triggered by the generated commit need manual approval.** The push as `github-actions[bot]` creates `pull_request` runs that GitHub holds as "Action required". The workflow dispatches `ci.yml` explicitly to get an independent check without approval; the held `Test agent` run, once approved, exits immediately through the loop guard. Third-party checks that listen to `pull_request` will not run for that commit until approved.
+- **An API error is a wasted run.** The first two live runs failed in one turn because the Anthropic Console had no prepaid credit; the CLI returns `is_error: true` in about 300 ms. The report now carries the CLI's error text (`extract-report.mjs`), and the comment names the agent failure as the cause instead of blaming coverage.
 - **One agent run per PR event** with `cancel-in-progress`; quick successive pushes cancel earlier runs.
 - **Runtime and cost** scale with the diff; large refactors should be split, or the budgets raised through repository variables.
 
