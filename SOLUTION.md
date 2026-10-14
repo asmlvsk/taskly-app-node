@@ -19,7 +19,7 @@ Agent environment: **Claude Code** (CLI, headless `claude -p`), chosen because i
 | **Secrets never reach PR code** | The agent runs `npm test`, i.e. code from the PR. With `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` Claude Code strips the API key and cloud credentials from every subprocess and runs it in a bubblewrap sandbox. Verified locally: without it, a test started by the agent reads the key from `process.env`; with it, the variable is absent. Checkout does not persist `GITHUB_TOKEN`; only the push and comment steps receive it. Artifacts are redacted before upload because anyone signed in can download them from a public repository. See section 2, "Threat model". |
 | **Coverage ratchet against the base branch** | Green tests are not enough: `base-coverage.sh` measures the base commit in a temporary worktree (reusing `node_modules` when lock files match, about 3 s) and `check-coverage.mjs` fails the check if line or branch coverage of a package drops by more than 0.1 points. The tests are still committed when green; the failing check tells the reviewer the PR is under-tested. |
 | **Stale tests are handled, deletions are re-checked** | Deleted and renamed-away sources are passed to the agent separately. It may `git rm` a test only under a `delete` decision, and `guard-paths.sh` accepts a deletion only if the test is on the allow list and its source module is really gone. Shared helpers (`fixture.ts`, `src/test/**`, `mocks.tsx`) can never be deleted. |
-| **The automation is tested too** | 33 `node:test` tests in `.github/scripts/__tests__` cover the guard (allow list, staged deletions, stale tests, renames, paths with spaces), change detection, stub cleanup, report extraction and normalization, comment rendering, the ratchet and redaction. CI runs them with `shellcheck`. Mutating the guard's allow list or deletion rule makes them fail. |
+| **The automation is tested too** | 34 `node:test` tests in `.github/scripts/__tests__` cover the guard (allow list, staged deletions, stale tests, renames, paths with spaces), change detection, stub cleanup, report extraction and normalization, comment rendering, the ratchet and redaction. CI runs them with `shellcheck`. Mutating the guard's allow list or deletion rule makes them fail. |
 | **Commits via `GITHUB_TOKEN`** | Such pushes do not trigger new workflow runs, which rules out agent → push → agent loops by construction. A `[test-agent]` marker in the commit message is a second guard. An independent `CI` run is then dispatched explicitly with `gh workflow run`. |
 | **Unit tests never need PostgreSQL** | Kept from the sample: repository tests spy on the real Prisma delegate without connecting. This keeps the workflow to `npm ci` + `vitest`, with no services and no secrets other than the API key. |
 
@@ -203,7 +203,7 @@ The comment the workflow posts on the pull request, exactly as rendered by `rend
 
 Added tests for the new 'clear completed tasks' feature on the backend and frontend. Both full suites pass: backend 91 tests, frontend 105. Typecheck and Prettier checks are clean.
 
-Committed as [`3bfc877`](https://github.com/asmlvsk/taskly-app-node/commit/3bfc877ce1238b3592c370e4f79992f073f1a63f).
+Committed as `3bfc877` (a local commit of this replay; in the live run the comment links to the commit the workflow pushed).
 
 ##### Decisions
 
@@ -244,7 +244,7 @@ Committed as [`3bfc877`](https://github.com/asmlvsk/taskly-app-node/commit/3bfc8
 
 </details>
 
-An earlier attempt of this run (before the skill-injection fix) produced equally green tests but reported "I could not see the skill files" and returned the report with different key names; that attempt is what led to the explicit `--append-system-prompt-file` injection and the key normalization in `extract-report.mjs`. The live run of this workflow on GitHub is attached to the pull request of the `feat/clear-completed` branch in this repository.
+An earlier attempt of this run (before the skill-injection fix) produced equally green tests but reported "I could not see the skill files" and returned the report with different key names; that attempt is what led to the explicit `--append-system-prompt-file` injection and the key normalization in `extract-report.mjs`. The live run of this workflow on GitHub is attached to the pull request of the `feat/clear-completed` branch in this repository. The branch is pushed with the feature commit only (without the agent commit of the local replays), so the workflow runs, commits and comments on GitHub itself; note that a head commit carrying the `[test-agent]` marker would make the loop guard skip the run.
 
 
 ### Run 5: the hardened workflow, replayed end to end (`prompt.md`, CI defaults)
@@ -264,7 +264,7 @@ This replay surfaced one more defect, visible in the "Reverted" list below: in a
 
 Added tests for the new 'clear completed tasks' feature on the backend and frontend. Both suites are green (backend 91 tests, frontend 105) and typecheck and Prettier pass. Line coverage rose on both sides.
 
-Committed as [`7db5fc1`](https://github.com/asmlvsk/taskly-app-node/commit/7db5fc1276d2e4ad002a640c2d333a7350526ebe).
+Committed as `7db5fc1` (a local commit of this replay; in the live run the comment links to the commit the workflow pushed).
 
 ##### Decisions
 

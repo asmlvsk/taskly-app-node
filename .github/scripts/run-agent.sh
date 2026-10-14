@@ -74,7 +74,7 @@ printf '%s\n' "$prompt" > ".agent/$OUTPUT_PREFIX-prompt.txt"
   echo
   echo "# Report contract"
   echo
-  echo "Your final message must be exactly one JSON object and nothing else (no prose, no code fence), using exactly these top-level keys: summary, decisions, skillsUsed, filesChanged, results, notes. Each decision has the keys path, action (create|update|skip), testFile, reason. results has backend and frontend, each with ran and, when ran is true, passed, failed, coverageLinesBefore, coverageLinesAfter. JSON Schema:"
+  echo "Your final message must be exactly one JSON object and nothing else (no prose, no code fence), using exactly these top-level keys: summary, decisions, skillsUsed, filesChanged, results, notes. Each decision has the keys path, action (create|update|delete|skip), testFile, reason. results has backend and frontend, each with ran and, when ran is true, passed, failed, coverageLinesBefore, coverageLinesAfter. JSON Schema:"
   echo
   cat .github/agent/report.schema.json
 } > ".agent/$OUTPUT_PREFIX-system-append.md"
