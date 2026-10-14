@@ -1,6 +1,8 @@
 version: 2
 updates:
   # Keeps the SHA-pinned actions current; Dependabot rewrites the SHA and the version comment.
+  # npm updates are deliberately not automated in this demo repository: a dozen dependency
+  # pull requests would hide the pull request that demonstrates the test agent.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -8,15 +10,3 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-
-  - package-ecosystem: npm
-    directory: /backend
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-
-  - package-ecosystem: npm
-    directory: /frontend
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5

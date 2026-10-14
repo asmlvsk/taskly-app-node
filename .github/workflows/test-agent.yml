@@ -15,7 +15,7 @@ name: Test agent
 # - The agent has an explicit tool allow list; guard-paths.sh restores anything outside
 #   the test paths; verification, the coverage ratchet and the commit run in plain shell.
 # - Logs are redacted before they are uploaded as artifacts.
-# - Commits made with GITHUB_TOKEN do not trigger workflows, so the agent cannot loop.
+# - A head commit with the [test-agent] marker makes the workflow exit at once, so the agent cannot loop.
 
 on:
   pull_request:
