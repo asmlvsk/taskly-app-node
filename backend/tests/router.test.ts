@@ -86,6 +86,22 @@ it('deletes a task and returns an empty 204', async () => {
   expect(response.text).toBe('');
   expect(repository.delete).toHaveBeenCalledWith(1);
 });
+it('deletes completed tasks and reports how many were removed', async () => {
+  const { app, repository } = setup();
+  repository.deleteCompleted.mockResolvedValue(3);
+  const response = await request(app).delete('/api/todos/completed');
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ deleted: 3 });
+  expect(repository.deleteCompleted).toHaveBeenCalledOnce();
+  expect(repository.delete).not.toHaveBeenCalled();
+});
+it('reports zero when no task is completed', async () => {
+  const { app, repository } = setup();
+  repository.deleteCompleted.mockResolvedValue(0);
+  const response = await request(app).delete('/api/todos/completed');
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual({ deleted: 0 });
+});
 it('returns 404 when deleting a missing task', async () => {
   const { app, repository } = setup();
   repository.delete.mockResolvedValue(false);
