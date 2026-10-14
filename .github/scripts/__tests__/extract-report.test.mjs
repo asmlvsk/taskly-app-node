@@ -99,3 +99,19 @@ test('writes a fallback report when the run ended without any JSON', (t) => {
   assert.equal(result.summary, 'The agent did not return a structured report.')
   assert.deepEqual(result.notes, ['Agent run ended with error_max_turns.'])
 })
+
+test('carries the CLI error message into the report instead of parsing it', (t) => {
+  // An invalid key or an empty credit balance: the CLI answers in one turn, at no cost,
+  // with subtype "success" but is_error true and the error text as the result.
+  const result = extract(t, cliResult({ is_error: true, num_turns: 1, duration_ms: 284, total_cost_usd: 0, permission_denials: [], result: 'Invalid API key · Please run /login' }))
+  assert.equal(result.summary, 'The agent did not return a structured report.')
+  assert.deepEqual(result.notes, ['Agent error: Invalid API key · Please run /login'])
+  assert.equal(result.meta.isError, true)
+  assert.equal(result.meta.errorMessage, 'Invalid API key · Please run /login')
+
+  // An API error body contains braces; it must not be mistaken for a report.
+  const api = extract(t, cliResult({ is_error: true, result: 'API Error: 400 {"type":"error","error":{"message":"Your credit balance is too low"}}' }))
+  assert.deepEqual(api.decisions, [])
+  assert.match(api.notes[0], /^Agent error: API Error: 400 .*credit balance is too low/)
+  assert.equal(api.meta.source, 'structured_output')
+})

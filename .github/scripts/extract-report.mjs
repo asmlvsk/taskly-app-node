@@ -3,7 +3,9 @@
 // Prefers `structured_output`; otherwise parses the JSON object in the free-text result
 // (code fences tolerated) and normalizes common key variations so the renderer always
 // gets the shape of .github/agent/report.schema.json. Finally falls back to a minimal
-// "no report" object so later steps always have something to render.
+// "no report" object so later steps always have something to render. When the CLI
+// reports an error (`is_error: true`, e.g. an invalid API key or an exhausted credit
+// balance), the error text is carried into the report instead of being parsed.
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const [input, output] = process.argv.slice(2)
@@ -73,29 +75,39 @@ try {
     permissionDenials: message?.permission_denials?.length ?? 0,
     source: 'structured_output',
   }
-  let candidate = message?.structured_output ?? null
-  if (!candidate && typeof message?.result === 'string') {
-    const text = message.result.replace(/```(?:json)?/g, '')
-    const start = text.indexOf('{')
-    const end = text.lastIndexOf('}')
-    if (start !== -1 && end > start) {
-      candidate = JSON.parse(text.slice(start, end + 1))
-      meta.source = 'result-text'
+  if (meta.isError && typeof message?.result === 'string' && message.result.trim()) {
+    // The result text is the CLI's error message, not a report; never parse it as one.
+    meta.errorMessage = message.result.trim()
+  } else {
+    let candidate = message?.structured_output ?? null
+    if (!candidate && typeof message?.result === 'string') {
+      const text = message.result.replace(/```(?:json)?/g, '')
+      const start = text.indexOf('{')
+      const end = text.lastIndexOf('}')
+      if (start !== -1 && end > start) {
+        candidate = JSON.parse(text.slice(start, end + 1))
+        meta.source = 'result-text'
+      }
     }
+    if (candidate && typeof candidate === 'object') report = normalize(candidate)
   }
-  if (candidate && typeof candidate === 'object') report = normalize(candidate)
 } catch (error) {
   meta.parseError = String(error)
 }
 
 if (!report) {
+  const note = meta.errorMessage
+    ? `Agent error: ${meta.errorMessage}`
+    : meta.parseError
+      ? `Could not parse agent output: ${meta.parseError}`
+      : `Agent run ended with ${meta.subtype ?? 'unknown status'}.`
   report = {
     summary: 'The agent did not return a structured report.',
     decisions: [],
     skillsUsed: [],
     filesChanged: [],
     results: { backend: { ran: false }, frontend: { ran: false } },
-    notes: [meta.parseError ? `Could not parse agent output: ${meta.parseError}` : `Agent run ended with ${meta.subtype ?? 'unknown status'}.`],
+    notes: [note],
   }
 }
 report.meta = meta

@@ -100,6 +100,38 @@ test('distinguishes "no changes needed" from "verification did not run"', (t) =>
   assert.match(missing, /\*\*⚠️ Verification did not run\*\*/)
 })
 
+test('names an agent failure as the cause instead of blaming coverage', (t) => {
+  // The CLI returned an error (bad key, no credits) after one turn: nothing was written,
+  // so verification is green and the ratchet drops, but the headline must be the failure.
+  const failed = {
+    summary: 'The agent did not return a structured report.',
+    decisions: [],
+    skillsUsed: [],
+    filesChanged: [],
+    results: { backend: { ran: false }, frontend: { ran: false } },
+    notes: ['Agent error: Invalid API key · Please run /login'],
+    meta: { subtype: 'success', isError: true, numTurns: 1, durationMs: 284, costUsd: 0, permissionDenials: 0, errorMessage: 'Invalid API key · Please run /login' },
+  }
+  const out = render(
+    t,
+    {
+      '.agent/report.json': failed,
+      '.agent/after-verify.json': green(95.5),
+      '.agent/guard.json': { violations: [], kept: [] },
+      '.agent/coverage-check.json': {
+        tolerance: 0.1,
+        ok: false,
+        packages: { backend: { checked: true, ok: false, lines: { base: 97.2, after: 95.5 }, branches: { base: 97.9, after: 97.9 } } },
+      },
+    },
+    { AGENT_OUTCOME: 'failure' },
+  )
+  assert.match(out, /\*\*❌ The agent run failed before it could write any test\*\*/)
+  assert.match(out, /- Agent error: Invalid API key · Please run \/login/)
+  assert.match(out, /\*\*Agent run:\*\* 1 turns, 0s, \$0\.00 \(failure\)/)
+  assert.match(out, /❌ dropped/, 'the ratchet table is still shown')
+})
+
 test('warns when the suite was already red before the agent ran', (t) => {
   const before = green(97)
   before.backend.tests = false

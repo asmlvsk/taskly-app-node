@@ -40,8 +40,10 @@ const agentOutcome = process.env.AGENT_OUTCOME || 'unknown'
 
 const verifyOk = after && ['backend', 'frontend'].every((p) => after[p]?.typecheck && after[p]?.tests)
 const changed = guard.kept.length > 0
+const agentFailed = Boolean(report.meta?.isError) && !changed
 let status
 if (!after) status = '⚠️ Verification did not run'
+else if (agentFailed) status = '❌ The agent run failed before it could write any test'
 else if (verifyOk && ratchet && !ratchet.ok) status = '❌ Tests are green, but coverage is below the base branch'
 else if (verifyOk && commitSha) status = '✅ Tests generated, verified and committed'
 else if (verifyOk && !changed) status = 'ℹ️ No test changes were needed'
